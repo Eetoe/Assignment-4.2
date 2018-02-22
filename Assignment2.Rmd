@@ -1,0 +1,318 @@
+---
+title: "Computational Modeling - Week 4 - Assignment 2 - Part 1"
+author: "Riccardo Fusaroli"
+date: "2/19/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(ggplot2)
+library(dplyr)
+
+
+```
+
+## In this assignment we learn how to assess rates from a binomial distribution, using the case of assessing your teachers' knowledge of CogSci
+
+### First part
+
+You want to assess your teachers' knowledge of cognitive science. "These guys are a bunch of drama(turgist) queens, mindless philosophers, chattering communication people and Russian spies. Do they really know CogSci?", you think.
+
+To keep things simple (your teachers should not be faced with too complicated things):
+- You created a pool of equally challenging questions on CogSci
+- Each question can be answered correctly or not (we don't allow partially correct answers, to make our life simpler).
+- Knowledge of CogSci can be measured on a scale from 0 (negative knowledge, all answers wrong) through 0.5 (random chance) to 1 (awesome CogSci superpowers)
+
+This is the data:
+- Riccardo: 3 correct answers out of 6 questions
+- Kristian: 2 correct answers out of 2 questions (then he gets bored)
+- Josh: 160 correct answers out of 198 questions (Josh never gets bored)
+- Mikkel: 66 correct answers out of 132 questions
+
+```{r}
+d=data.frame(Teacher = c("R", "K", "J", "M"),
+             nq = c(6, 2, 198, 132),
+             nc = c(3, 2, 160, 66),
+             ds = "d1")
+
+
+```
+
+
+Questions:
+
+1. What's Riccardo's estimated knowledge of CogSci? What is the probability he knows more than chance (0.5) [try figuring this out. if you can't peek into chapters 3.1 and 3.2 and/or the slides]?
+- First implement a grid approximation (hint check paragraph 2.4.1!) with a uniform prior, calculate the posterior and plot the results
+- Then implement a quadratic approximation (hint check paragraph 2.4.2!).
+- N.B. for the rest of the exercise just keep using the grid approximation (we'll move to quadratic approximations in two classes)
+
+```{r}
+#Define the grid
+dens=20
+p_grid <- seq( from=0 , to=1 , length.out=dens)
+
+#Define prior
+prior <- rep( 1 , dens ) # Flat
+# prior <- ifelse(p_grid < Ϭ.5 , Ϭ , ϭ) # UnreasonablyOptimisticPrior
+
+#Calculate each point in the grid
+likelihood <- dbinom( 3 , size=6 , prob=p_grid )
+
+#Unstandardized posterior
+unstd.posterior <- likelihood * prior 
+
+#Standardized posterior
+posterior <- unstd.posterior / sum(unstd.posterior)
+
+#Draw the plot, grid approximation
+Data=data.frame(grid=p_grid,posterior=posterior,prior=prior,likelihood=likelihood) 
+ggplot(Data,aes(grid, posterior)) + geom_point() + geom_line() + theme_classic() + geom_line(aes(grid,prior/dens),color='red') + 
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+#Quadratic approximation
+quad = map(alist( w ~ dbinom(6,p), p ~ dunif(0,1)),
+           data = list(w = 3))
+precis(quad)
+
+#plot quadratic approximation
+w = 3
+n = 6
+curve( dbeta(x, w+1, n -2+1), from = 0, to = 1)
+#add  analytical calculation
+curve(dnorm(x, 0.5, 0.17), lty = 2, add = TRUE)
+
+#P knowledge > 0.5
+sum(posterior[p_grid > 0.5]) #0.5. Indexing a vector by another vector is like a df
+
+
+```
+
+
+2. Estimate all the teachers' knowledge of CogSci. Who's best? Use grid approximation. Comment on the posteriors of Riccardo and Mikkel.
+2a. Produce plots of the prior, and posterior for each teacher.
+
+```{r}
+#Density to use in the loop
+dens=1000
+
+
+#df for loop. Run loop w/o resetting four times, 2x priors, 2x data sets
+#d_loop = data.frame()
+#d_loop = filter(d_loop, V1 == x, V2 == y) #select a subset to remove rows if loop messed up
+
+
+for (t in d$Teacher){
+  #------ Get posteriors ------
+  #d_t = filter(d, Teacher == t) #Original data
+  d_t = filter(d100, Teacher == t) #nq and nc multiplied by 100
+  
+  #Define the grid
+  p_grid <- seq( from=0 , to=1 , length.out=dens)
+  
+  
+  #Prior of the loop
+  #prior <- rep( 1 , dens ) # Flat
+  #p_type = "flat"
+  prior = dnorm(p_grid, mean = 0.8, sd = 0.2) #Normally distributed power
+  p_type = "norm"
+  
+  #Calculate each point in the grid
+  likelihood <- dbinom( d_t$nc , size = d_t$nq, prob=p_grid )
+  
+  #Unstandardized posterior
+  unstd.posterior <- likelihood * prior 
+  
+  #Standardized posterior
+  posterior <- unstd.posterior / sum(unstd.posterior)
+  
+  #------ save results in a data frame ------
+  one_row = data.frame(Teacher = t,
+              grid = p_grid,
+              prior = prior,
+              p_type = p_type,
+              likelihood = likelihood,
+              posterior = posterior,
+              ds = d_t$ds)
+  
+  d_loop = rbind(d_loop, one_row)
+  
+
+}
+
+
+#To numerically support 
+d_t2 = filter(d_loop, Teacher == "M", ds == "d1", p_type == "norm") 
+
+sum(d_t2$posterior[d_t2$grid > 0.5]) #Flat: K = 0.8751876, J = 1, Norm:K = 0.9757951, J = 1
+sum(d_t2$posterior[d_t2$grid > 0.75]) #Flat: K = 0.5783361, J = 0.9693629, Norm:K = 0.6843464, J = 0.9705586
+
+#The value in the grid list where the posterior is highest
+d_t2$grid[d_t2$posterior == max(d_t2$posterior)]
+
+
+```
+
+
+Plots
+```{r}
+
+#Posterior for each teacher and each prior
+#In grid
+ggplot(d_loop,aes(grid, posterior, color = Teacher)) +
+  geom_point(size=0.5) + geom_line() + #Add dots and line between dots
+  theme_classic() + geom_line(aes(grid,prior/dens),color='red') + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability") +
+  facet_grid(p_type~ds)
+
+#In two plots
+#d1
+ggplot(filter(d_loop, ds == "d1"),aes(grid, posterior, color = Teacher, linetype = p_type)) +
+  geom_line() +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens), color = 'blue', size = 1) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+#d100
+ggplot(filter(d_loop, ds == "d100"),aes(grid, posterior, color = Teacher, shape = p_type)) +
+  geom_line(aes(linetype = p_type)) + #Add dots and line between dots
+  theme_classic() +
+  geom_line(aes(grid,prior/dens),color='blue', size = ) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+#Individual plots for each teacher
+#R
+ggplot(filter(d_loop, Teacher == "R", ds == "d1"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability") +
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "R", ds == "d100"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "R"),aes(grid, posterior, color = ds, shape = p_type)) +
+  geom_line(aes(linetype = p_type)) + #Add dots and line between dots
+  theme_classic() +
+  geom_line(aes(grid,prior/dens),color='blue') + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+#K
+ggplot(filter(d_loop, Teacher == "K", ds == "d1"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "K", ds == "d100"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "K"),aes(grid, posterior, color = ds, shape = p_type)) +
+  geom_line(aes(linetype = p_type)) + #Add dots and line between dots
+  theme_classic() + geom_line(aes(grid,prior/dens),color='blue') + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+#J
+ggplot(filter(d_loop, Teacher == "J", ds == "d1"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "J", ds == "d100"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "J"),aes(grid, posterior, color = ds, shape = p_type)) +
+  geom_line(aes(linetype = p_type)) + #Add dots and line between dots
+  theme_classic() + geom_line(aes(grid,prior/dens),color='blue') + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+#M
+ggplot(filter(d_loop, Teacher == "M", ds == "d1"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "M", ds == "d100"), aes(grid, posterior, group = p_type)) +
+  geom_line(aes(linetype = p_type)) +
+  theme_classic() +
+  geom_line(aes(grid,prior/dens, color='red', linetype = p_type)) + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")+
+  theme(legend.position="none")
+
+ggplot(filter(d_loop, Teacher == "M"),aes(grid, posterior, color = ds, shape = p_type)) +
+  geom_line(aes(linetype = p_type)) + #Add dots and line between dots
+  theme_classic() + geom_line(aes(grid,prior/dens),color='blue') + #Add prior to the plot
+  xlab("Knowledge of CogSci") + ylab("posterior probability")
+
+
+
+
+```
+
+
+
+3. Change the prior. Given your teachers have all CogSci jobs, you should start with a higher appreciation of their knowledge: the prior is a normal distribution with a mean of 0.8 and a standard deviation of 0.2. Do the results change (and if so how)?
+3a. Produce plots of the prior and posterior for each teacher.
+
+Uses the loop of section 2
+
+4. You go back to your teachers and collect more data (multiply the previous numbers by 100). Calculate their knowledge with both a uniform prior and a normal prior with a mean of 0.8 and a standard deviation of 0.2. Do you still see a difference between the results? Why?
+
+Uses the loop of section 2
+
+```{r}
+d100 = data.frame(Teacher = c("R", "K", "J", "M"),
+             nq = c(6, 2, 198, 132)*100,
+             nc = c(3, 2, 160, 66)*100,
+             ds = "d100")
+```
+
+
+5. Imagine you're a skeptic and think your teachers do not know anything about CogSci, given the content of their classes. How would you operationalize that belief?
+
+I'd make a normally distributed prior, with a mean of 0.5 and a low sd, e.g.0.05.
+
+
+6. Optional question: Can you estimate the difference between Riccardo's estimated knowledge and that of each of the other teachers? Would you deem it credible (that is, would you believe that it is actually different)?
+
+7. Bonus knowledge: all the stuff we have done can be implemented in a lme4-like fashion using the brms package. Here is an example.
+```{r}
+library(brms)
+d <- data.frame(
+  Correct=c(3,2,160,66),
+  Questions=c(6,2,198,132),
+  Teacher=c("RF","KT","JS","MW"))
+
+FlatModel <- brm(Correct|trials(Questions)~1,data=subset(d,Teacher=="RF"),prior=prior("uniform(0,1)", class = "Intercept"))
+plot(FlatModel)
+PositiveModel <- brm(Correct|trials(Questions)~1,data=subset(d,Teacher=="RF"),prior=prior("normal(0.8,0.2)", class = "Intercept"))
+plot(PositiveModel)
+SkepticalModel <- brm(Correct|trials(Questions)~1,data=subset(d,Teacher=="RF"),prior=prior("normal(0.5,0.01)", class = "Intercept"))
+plot(SkepticalModel)
+```
+
+If you dare, try to tweak the data and model to test two hypotheses:
+- Is Kristian different from Josh?
+- Is Josh different from chance?
+
+
+
